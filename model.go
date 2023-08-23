@@ -191,13 +191,12 @@ type MassExtendRenewalDateStatusResponse struct {
 
 // NotificationHistoryRequest https://developer.apple.com/documentation/appstoreserverapi/notificationhistoryrequest
 type NotificationHistoryRequest struct {
-	StartDate             int64              `json:"startDate"`
-	EndDate               int64              `json:"endDate"`
-	OriginalTransactionId string             `json:"originalTransactionId,omitempty"`
-	NotificationType      NotificationTypeV2 `json:"notificationType,omitempty"`
-	NotificationSubtype   SubtypeV2          `json:"notificationSubtype,omitempty"`
-	OnlyFailures          bool               `json:"onlyFailures"`
-	TransactionId         string             `json:"transactionId"`
+	StartDate           int64              `json:"startDate"`
+	EndDate             int64              `json:"endDate"`
+	NotificationType    NotificationTypeV2 `json:"notificationType,omitempty"`
+	NotificationSubtype SubtypeV2          `json:"notificationSubtype,omitempty"`
+	OnlyFailures        bool               `json:"onlyFailures"`
+	TransactionId       string             `json:"transactionId,omitempty"`
 }
 
 type NotificationTypeV2 string

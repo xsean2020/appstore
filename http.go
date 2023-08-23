@@ -69,8 +69,15 @@ func RequireResponseStatus(c HTTPClient, status ...int) DoFunc {
 		if err != nil {
 			return resp, err
 		}
+
+		bts, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewBuffer(bts))
 		if !valid[resp.StatusCode] {
-			return resp, fmt.Errorf("received invalid status code: %d", resp.StatusCode)
+			if len(bts) > 0 {
+				return resp, fmt.Errorf("received invalid status code: %d  msg %s", resp.StatusCode, bts)
+			}
+			return resp, fmt.Errorf("received invalid status code: %d ", resp.StatusCode)
 		}
 		return resp, nil
 	}
