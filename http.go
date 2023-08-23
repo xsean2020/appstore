@@ -2,8 +2,8 @@ package appstore
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -76,31 +76,6 @@ func RequireResponseStatus(c HTTPClient, status ...int) DoFunc {
 	}
 }
 
-type Initializer func(HTTPClient) (DoFunc, error)
-
-func SetInitializer(c HTTPClient, init Initializer) DoFunc {
-	var f DoFunc
-	return func(req *http.Request) (*http.Response, error) {
-		var err error
-		f, err = init(c)
-		if err != nil {
-			return nil, err
-		}
-
-		return f.Do(req)
-	}
-}
-
-func SetRequest(ctx context.Context, c HTTPClient, method string, url string) DoFunc {
-	return func(_ *http.Request) (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, method, url, nil)
-		if err != nil {
-			return nil, err
-		}
-		return c.Do(req)
-	}
-}
-
 type Marshaller func(v any) ([]byte, error)
 type Unmarshaller func(b []byte, v any) error
 
@@ -161,11 +136,12 @@ func RateLimit(c HTTPClient, reqPerMin int) DoFunc {
 	ch := make(chan struct{}, reqPerMin)
 	go func() {
 		for range ticker.C {
+		L:
 			for i := 0; i < reqPerMin; i++ {
 				select {
 				case ch <- struct{}{}:
 				default:
-					break
+					break L
 				}
 			}
 		}
@@ -187,7 +163,7 @@ func ShouldRetryDefault(status int, err error) bool {
 	if status == http.StatusTooManyRequests {
 		return true
 	}
-	if err == io.ErrUnexpectedEOF {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return true
 	}
 

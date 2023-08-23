@@ -88,12 +88,17 @@ func NewStoreClientWithHTTPClient(config *StoreConfig, httpClient *http.Client) 
 	return client
 }
 
-func (c *StoreClient) initHttpClient(hc HTTPClient) (DoFunc, error) {
-	authToken, err := c.Token.GenerateIfExpired()
-	if err != nil {
-		return nil, fmt.Errorf("appstore generate token err %w", err)
+func (c *StoreClient) httpClient() HTTPClient {
+	var client DoFunc = func(req *http.Request) (*http.Response, error) {
+		authToken, err := c.Token.GenerateIfExpired()
+		if err != nil {
+			return nil, fmt.Errorf("appstore generate token err %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		req.Header.Set("User-Agent", "App Store Client")
+		return c.httpCli.Do(req)
 	}
-	return AddHeader(hc, "Authorization", "Bearer "+authToken), nil
+	return client
 }
 
 // GetALLSubscriptionStatuses https://developer.apple.com/documentation/appstoreserverapi/get_all_subscription_statuses
@@ -101,15 +106,13 @@ func (c *StoreClient) GetALLSubscriptionStatuses(ctx context.Context, originalTr
 	URL := c.hostUrl + PathGetALLSubscriptionStatus
 	URL = strings.Replace(URL, "{originalTransactionId}", originalTransactionId, -1)
 
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
+	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
-	client = SetRequest(ctx, client, http.MethodGet, URL)
+
 	rsp := &StatusResponse{}
 	client = SetResponseBodyHandler(client, json.Unmarshal, rsp)
-
-	_, err := client.Do(nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
+	_, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -121,15 +124,13 @@ func (c *StoreClient) GetTransactionInfo(ctx context.Context, transactionId stri
 	URL := c.hostUrl + PathTransactionInfo
 	URL = strings.Replace(URL, "{transactionId}", transactionId, -1)
 
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
+	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
-	client = SetRequest(ctx, client, http.MethodGet, URL)
+
 	rsp := &TransactionInfoResponse{}
 	client = SetResponseBodyHandler(client, json.Unmarshal, rsp)
-
-	_, err := client.Do(nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
+	_, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -140,16 +141,12 @@ func (c *StoreClient) GetTransactionInfo(ctx context.Context, transactionId stri
 func (c *StoreClient) LookupOrderID(ctx context.Context, orderId string) (*OrderLookupResponse, error) {
 	URL := c.hostUrl + PathLookUp
 	URL = strings.Replace(URL, "{orderId}", orderId, -1)
-
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
-	client = RequireResponseStatus(client, http.StatusOK)
-	client = SetRequest(ctx, client, http.MethodGet, URL)
 	rsp := &OrderLookupResponse{}
+	client := c.httpClient()
+	client = RequireResponseStatus(client, http.StatusOK)
 	client = SetResponseBodyHandler(client, json.Unmarshal, rsp)
-
-	_, err := client.Do(nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
+	_, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -165,16 +162,14 @@ func (c *StoreClient) GetTransactionHistory(ctx context.Context, originalTransac
 		query = &url.Values{}
 	}
 
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
+	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
 
 	for {
 		rsp := HistoryResponse{}
-		client = SetRequest(ctx, client, http.MethodGet, URL+"?"+query.Encode())
 		client = SetResponseBodyHandler(client, json.Unmarshal, &rsp)
-		_, err = client.Do(nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL+"?"+query.Encode(), nil)
+		_, err = client.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -200,16 +195,14 @@ func (c *StoreClient) GetRefundHistory(ctx context.Context, originalTransactionI
 	baseURL = strings.Replace(baseURL, "{originalTransactionId}", originalTransactionId, -1)
 
 	URL := baseURL
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
+	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
 
 	for {
 		rsp := RefundLookupResponse{}
-		client = SetRequest(ctx, client, http.MethodGet, URL)
 		client = SetResponseBodyHandler(client, json.Unmarshal, &rsp)
-		_, err = client.Do(nil)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
+		_, err = client.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -324,19 +317,18 @@ func (c *StoreClient) GetNotificationHistory(ctx context.Context, body Notificat
 	}
 
 	URL := baseURL
-	var client HTTPClient
-	client = c.httpCli
-	client = SetInitializer(client, c.initHttpClient)
+	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
 
 	for {
 		rsp := NotificationHistoryResponses{}
 		rsp.NotificationHistory = make([]NotificationHistoryResponseItem, 0)
 
-		client = SetRequest(ctx, client, http.MethodPost, URL)
 		client = SetRequestBodyJSON(client, bodyBuf)
 		client = SetResponseBodyHandler(client, json.Unmarshal, &rsp)
-		_, err = client.Do(nil)
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, URL, nil)
+		_, err = client.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -462,38 +454,27 @@ func (c *StoreClient) parseJWS(jwsEncode string, claims jwt.Claims) error {
 
 func (c *StoreClient) parseSignedTransaction(transaction string) (*JWSTransaction, error) {
 	tran := &JWSTransaction{}
-
 	err := c.parseJWS(transaction, tran)
 	if err != nil {
 		return nil, err
 	}
-
 	return tran, nil
 }
 
 // Per doc: https://developer.apple.com/documentation/appstoreserverapi#topics
 func (c *StoreClient) Do(ctx context.Context, method string, url string, body io.Reader) (int, []byte, error) {
-	authToken, err := c.Token.GenerateIfExpired()
-	if err != nil {
-		return 0, nil, fmt.Errorf("appstore generate token err %w", err)
-	}
-
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("appstore new http request err %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authToken)
-	req.Header.Set("User-Agent", "App Store Client")
 	req = req.WithContext(ctx)
-
-	resp, err := c.httpCli.Do(req)
+	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("appstore http client do err %w", err)
 	}
 	defer resp.Body.Close()
-
 	byteData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return resp.StatusCode, nil, fmt.Errorf("appstore read http body err %w", err)
@@ -504,6 +485,5 @@ func (c *StoreClient) Do(ctx context.Context, method string, url string, body io
 			return resp.StatusCode, byteData, rErr
 		}
 	}
-
 	return resp.StatusCode, byteData, err
 }
