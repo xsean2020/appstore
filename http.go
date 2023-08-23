@@ -157,12 +157,13 @@ func RateLimit(c HTTPClient, reqPerMin int) DoFunc {
 }
 
 func ShouldRetryDefault(status int, err error) bool {
-	if 500 <= status && status <= 599 {
+	if (500 <= status && status <= 599) || status == http.StatusUnauthorized {
 		return true
 	}
 	if status == http.StatusTooManyRequests {
 		return true
 	}
+
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return true
 	}
@@ -179,7 +180,6 @@ func SetRetry(c HTTPClient, bo Backoff, shouldRetry func(int, error) bool) DoFun
 		var resp *http.Response
 		var err error
 		var pause time.Duration
-
 		for {
 			select {
 			case <-req.Context().Done():
@@ -191,7 +191,6 @@ func SetRetry(c HTTPClient, bo Backoff, shouldRetry func(int, error) bool) DoFun
 			}
 
 			resp, err = c.Do(req)
-
 			var status int
 			if resp != nil {
 				status = resp.StatusCode
@@ -202,12 +201,12 @@ func SetRetry(c HTTPClient, bo Backoff, shouldRetry func(int, error) bool) DoFun
 			}
 
 			pause = bo.Pause()
-			if resp != nil && resp.Body != nil {
-				resp.Body.Close()
+			if pause < 0 {
+				break
 			}
 
-			if pause < 0 {
-				return nil, fmt.Errorf("sendAndRetry timeout for url %s", req.URL)
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close()
 			}
 		}
 		return resp, err

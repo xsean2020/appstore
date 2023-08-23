@@ -202,6 +202,12 @@ type NotificationHistoryRequest struct {
 
 type NotificationTypeV2 string
 
+type TestNotificationResponse struct {
+	TestNotificationToken string `json:"testNotificationToken"`
+	ErrorCode             int    `json:"errorCode"`
+	RrrorMessage          string `json:"errorMessage"`
+}
+
 // list of notificationType
 // https://developer.apple.com/documentation/appstoreservernotifications/notificationtype
 const (

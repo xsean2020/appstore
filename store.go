@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,17 +99,65 @@ func (c *StoreClient) httpClient() HTTPClient {
 		req.Header.Set("User-Agent", "App Store Client")
 		return c.httpCli.Do(req)
 	}
+
+	client = SetRetry(client, &JitterBackoff{}, func(i int, err error) bool {
+		if i == http.StatusUnauthorized {
+			return true
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return true
+		}
+
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		return false
+	})
 	return client
+}
+
+// GetTransactionHistory https://developer.apple.com/documentation/appstoreserverapi/get_transaction_history
+func (c *StoreClient) GetTransactionHistory(ctx context.Context, originalTransactionId string, query *url.Values) (responses []*HistoryResponse, err error) {
+	URL := c.hostUrl + PathTransactionHistory
+	URL = strings.Replace(URL, "{originalTransactionId}", originalTransactionId, -1)
+
+	if query == nil {
+		query = &url.Values{}
+	}
+
+	client := c.httpClient()
+	client = RequireResponseStatus(client, http.StatusOK)
+
+	for {
+		rsp := HistoryResponse{}
+		client = SetResponseBodyHandler(client, json.Unmarshal, &rsp)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL+"?"+query.Encode(), nil)
+		_, err = client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, &rsp)
+		if !rsp.HasMore {
+			return
+		}
+
+		if rsp.Revision != "" {
+			query.Set("revision", rsp.Revision)
+		} else {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // GetALLSubscriptionStatuses https://developer.apple.com/documentation/appstoreserverapi/get_all_subscription_statuses
 func (c *StoreClient) GetALLSubscriptionStatuses(ctx context.Context, originalTransactionId string) (*StatusResponse, error) {
 	URL := c.hostUrl + PathGetALLSubscriptionStatus
 	URL = strings.Replace(URL, "{originalTransactionId}", originalTransactionId, -1)
-
 	client := c.httpClient()
 	client = RequireResponseStatus(client, http.StatusOK)
-
 	rsp := &StatusResponse{}
 	client = SetResponseBodyHandler(client, json.Unmarshal, rsp)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL, nil)
@@ -151,42 +200,6 @@ func (c *StoreClient) LookupOrderID(ctx context.Context, orderId string) (*Order
 		return nil, err
 	}
 	return rsp, nil
-}
-
-// GetTransactionHistory https://developer.apple.com/documentation/appstoreserverapi/get_transaction_history
-func (c *StoreClient) GetTransactionHistory(ctx context.Context, originalTransactionId string, query *url.Values) (responses []*HistoryResponse, err error) {
-	URL := c.hostUrl + PathTransactionHistory
-	URL = strings.Replace(URL, "{originalTransactionId}", originalTransactionId, -1)
-
-	if query == nil {
-		query = &url.Values{}
-	}
-
-	client := c.httpClient()
-	client = RequireResponseStatus(client, http.StatusOK)
-
-	for {
-		rsp := HistoryResponse{}
-		client = SetResponseBodyHandler(client, json.Unmarshal, &rsp)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, URL+"?"+query.Encode(), nil)
-		_, err = client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		responses = append(responses, &rsp)
-		if !rsp.HasMore {
-			return
-		}
-
-		if rsp.Revision != "" {
-			query.Set("revision", rsp.Revision)
-		} else {
-			return
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 // GetRefundHistory https://developer.apple.com/documentation/appstoreserverapi/get_refund_history
@@ -351,10 +364,15 @@ func (c *StoreClient) GetNotificationHistory(ctx context.Context, body Notificat
 }
 
 // SendRequestTestNotification https://developer.apple.com/documentation/appstoreserverapi/request_a_test_notification
-func (c *StoreClient) SendRequestTestNotification(ctx context.Context) (int, []byte, error) {
+func (c *StoreClient) SendRequestTestNotification(ctx context.Context) (*TestNotificationResponse, error) {
 	URL := c.hostUrl + PathRequestTestNotification
-
-	return c.Do(ctx, http.MethodPost, URL, nil)
+	var rsp = new(TestNotificationResponse)
+	client := c.httpClient()
+	client = RequireResponseStatus(client, http.StatusOK, http.StatusNotFound, http.StatusTooManyRequests, http.StatusInternalServerError)
+	client = SetResponseBodyHandler(client, json.Unmarshal, rsp)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, URL, nil)
+	_, err := client.Do(req)
+	return rsp, err
 }
 
 // GetTestNotificationStatus https://developer.apple.com/documentation/appstoreserverapi/get_test_notification_status
@@ -365,10 +383,10 @@ func (c *StoreClient) GetTestNotificationStatus(ctx context.Context, testNotific
 	return c.Do(ctx, http.MethodGet, URL, nil)
 }
 
-func (c *StoreClient) ParseNotificationV2(tokenStr string) (*jwt.Token, error) {
-	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		return c.cert.extractPublicKeyFromToken(tokenStr)
-	})
+func (c *StoreClient) ParseNotificationV2(tokenStr string) (*NotificationPayload, error) {
+	var ret = new(NotificationPayload)
+	c.parseJWS(tokenStr, ret)
+	return ret, c.parseJWS(tokenStr, ret)
 }
 
 // ParseSignedTransactions parse the jws singed transactions
