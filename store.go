@@ -387,7 +387,7 @@ func (c *StoreClient) ParseNotificationV2(tokenStr string) (*NotificationPayload
 func (c *StoreClient) ParseSignedTransactions(transactions []string) ([]*JWSTransaction, error) {
 	result := make([]*JWSTransaction, 0)
 	for _, v := range transactions {
-		trans, err := c.parseSignedTransaction(v)
+		trans, err := c.ParseSignedTransaction(v)
 		if err == nil && trans != nil {
 			result = append(result, trans)
 		}
@@ -463,7 +463,7 @@ func (c *StoreClient) parseJWS(jwsEncode string, claims jwt.Claims) error {
 	return err
 }
 
-func (c *StoreClient) parseSignedTransaction(transaction string) (*JWSTransaction, error) {
+func (c *StoreClient) ParseSignedTransaction(transaction string) (*JWSTransaction, error) {
 	tran := &JWSTransaction{}
 	err := c.parseJWS(transaction, tran)
 	if err != nil {
